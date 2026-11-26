@@ -22,7 +22,7 @@ from pypdf import PdfReader
 HERE = Path(__file__).parent
 RULES = (HERE / "rules.txt").read_text(encoding="utf-8")
 CV_RULES = (HERE / "cv_rules.txt").read_text(encoding="utf-8")
-DEFAULT_MODEL = "claude-sonnet-5-5"
+DEFAULT_MODEL = "gemini-2.5-flash"
 
 st.set_page_config(page_title="Resume Tailor", page_icon="📄", layout="centered")
 
@@ -65,7 +65,7 @@ div.stButton>button, div.stDownloadButton>button{min-height:2.7rem;border-radius
 )
 
 # ----------------------------------------------------------------------------
-# Claude calls
+# AI calls
 # ----------------------------------------------------------------------------
 
 
@@ -74,9 +74,9 @@ def get_key() -> str:
     if key:
         return key
     try:
-        return st.secrets.get("ANTHROPIC_API_KEY", "") or os.environ.get("ANTHROPIC_API_KEY", "")
+        return st.secrets.get("GEMINI_API_KEY", "") or os.environ.get("GEMINI_API_KEY", "")
     except Exception:  # no secrets file
-        return os.environ.get("ANTHROPIC_API_KEY", "")
+        return os.environ.get("GEMINI_API_KEY", "")
 
 
 def get_model() -> str:
@@ -87,20 +87,29 @@ def get_model() -> str:
 
 
 def ask(prompt: str, images=None, max_tokens=8000) -> str:
-    import anthropic
+    import urllib.request, urllib.error
 
     key = get_key()
     if not key:
         raise RuntimeError("No API key. Add one in the sidebar.")
-    client = anthropic.Anthropic(api_key=key)
-    content = []
+    parts = []
     for media_type, data in images or []:
-        content.append(
-            {"type": "image", "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(data).decode()}}
-        )
-    content.append({"type": "text", "text": prompt})
-    msg = client.messages.create(model=get_model(), max_tokens=max_tokens, messages=[{"role": "user", "content": content}])
-    return "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
+        parts.append({"inline_data": {"mime_type": media_type, "data": base64.b64encode(data).decode()}})
+    parts.append({"text": prompt})
+    body = {"contents": [{"role": "user", "parts": parts}], "generationConfig": {"maxOutputTokens": max_tokens}}
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{get_model()}:generateContent"
+    req = urllib.request.Request(
+        url, data=json.dumps(body).encode(), headers={"Content-Type": "application/json", "x-goog-api-key": key}
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            res = json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Gemini error {e.code}: {e.read().decode()[:300]}")
+    cands = res.get("candidates") or []
+    if not cands:
+        raise RuntimeError("Gemini returned no answer. Try again.")
+    return "".join(p.get("text", "") for p in cands[0].get("content", {}).get("parts", []))
 
 
 def parse_json(text: str) -> dict:
@@ -500,13 +509,13 @@ def save_version():
 with st.sidebar:
     st.header("Settings")
     st.text_input(
-        "Your Anthropic API key",
+        "Your Gemini API key",
         type="password",
         key="user_key",
         help="Needed only if the owner of this app has not set one. The key stays in this browser session and is not stored.",
     )
-    st.caption("Get a key at console.anthropic.com. Using it costs a few cents per CV.")
-    st.caption("Your CV and job posts are sent to Claude to write your new CV. They are not saved on our side.")
+    st.caption("Get a free key at aistudio.google.com/apikey.")
+    st.caption("Your CV and job posts are sent to Google Gemini to write your new CV. They are not saved on our side.")
 
 st.title("Resume Tailor")
 st.write("Make a CV that fits each job, in 3 easy steps. We only use what you wrote, and we never make up skills.")
