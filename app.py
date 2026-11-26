@@ -26,6 +26,30 @@ DEFAULT_MODEL = "claude-sonnet-5-5"
 
 st.set_page_config(page_title="Resume Tailor", page_icon="📄", layout="centered")
 
+
+def _password_gate():
+    try:
+        pw = st.secrets.get("APP_PASSWORD", "")
+    except Exception:
+        pw = ""
+    if not pw:
+        st.error("App is locked. Add APP_PASSWORD in Streamlit Secrets.")
+        st.stop()
+    if st.session_state.get("_ok"):
+        return
+    st.title("Resume Tailor")
+    entered = st.text_input("Password", type="password")
+    if entered and entered == pw:
+        st.session_state["_ok"] = True
+        st.rerun()
+    if entered:
+        st.error("Wrong password")
+    st.stop()
+
+
+if not os.environ.get("RT_DEMO"):
+    _password_gate()
+
 st.markdown(
     """
 <style>
